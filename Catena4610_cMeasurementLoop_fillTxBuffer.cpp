@@ -88,7 +88,7 @@ cMeasurementLoop::fillTxBuffer(
         b.putT(mData.env.Temperature);
         b.putP(mData.env.Pressure);
         // no method for 2-byte RH, directly encode it.
-        b.put2uf((mData.env.Humidity / 100.0f) * 65535.0f);
+        b.putRH(mData.env.Humidity);
         }
 
     // put light
