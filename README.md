@@ -10,6 +10,7 @@
         - [List of required libraries](#list-of-required-libraries)
     - [Build and Download](#build-and-download)
     - [Load the sketch into the Catena](#load-the-sketch-into-the-catena)
+- [Fsm features in Catena 4610 sensor](#fsm-features-in-catena-4610-sensor)
 - [Set the identity of your Catena 4610](#set-the-identity-of-your-catena-4610)
     - [Check platform and serial number setup](#check-platform-and-serial-number-setup)
     - [Platform Provisioning](#platform-provisioning)
@@ -59,22 +60,22 @@ This is best done from a command line. You can use a number of techniques, but s
 
 On Windows, we strongly recommend use of "git bash", available from [git-scm.org](https://git-scm.com/download/win). Then use the "git bash" command line system that's installed by the download.
 
-The goal of this process is to create a directory called `{somewhere}/Catena-Sketches`. You get to choose `{somewhere}`. Everyone has their own convention; the author typically has a directory in his home directory called `sandbox`, and then puts projects there.
+The goal of this process is to create a directory called `{somewhere}/Catena4610_Sensor`. You get to choose `{somewhere}`. Everyone has their own convention; the author typically has a directory in his home directory called `sandbox`, and then puts projects there.
 
-Once you have a suitable command line open, you can enter the following commands. In the following, change `{somewhere}` to the directory path where you want to put `catena4610_simple`.
+Once you have a suitable command line open, you can enter the following commands. In the following, change `{somewhere}` to the directory path where you want to put `Catena4610_Sensor`.
 
 ```console
 $ cd {somewhere}
-$ git clone https://github.com/mcci-catena/catena4610_simple
-Cloning into 'catena4610_simple'...
+$ git clone https://github.com/mcci-catena/Catena4610_Sensor
+Cloning into 'Catena4610_Sensor'...
 ...
 
 $ # get to the right subdirectory
-$ cd catena4610_simple
+$ cd Catena4610_Sensor
 
 $ # confirm that you're in the right place.
 $ ls
-catena4610_simple.ino  git-repos.dat  README.md
+Catena4610_Sensor.ino  git-repos.dat  README.md
 ```
 
 ### Install the MCCI STM32 board support library
@@ -108,21 +109,24 @@ Either clone `[Catena-Sketches`]https://github.com/mcci-catena/Catena-Sketches),
 Then you can make sure your library directory is populated using `git-boot.sh`, which can be found here: [github.com/mcci-catena/Catena-Sketches/blob/master/git-boot.sh`](https://github.com/mcci-catena/Catena-Sketches/blob/master/git-boot.sh).
 
 ```console
-$ cd catena4610_simple
+$ cd Catena4610_Sensor
 $ git-boot.sh
-Cloning into 'Catena-Arduino-Platform'...
-remote: Counting objects: 1201, done.
-remote: Compressing objects: 100% (36/36), done.
-remote: Total 1201 (delta 27), reused 24 (delta 14), pack-reused 1151
-Receiving objects: 100% (1201/1201), 275.99 KiB | 0 bytes/s, done.
-Resolving deltas: 100% (900/900), done.
+Cloning into 'Adafruit_BME280_Library'...
+remote: Enumerating objects: 134, done.
+remote: Total 134 (delta 0), reused 0 (delta 0), pack-reused 134
+Receiving objects: 100% (134/134), 39.31 KiB | 275.00 KiB/s, done.
+Resolving deltas: 100% (68/68), done.
+
 ...
 
 ==== Summary =====
-No repos with errors
-No repos skipped.
-*** no repos were pulled ***
-Repos downloaded:      Catena-Arduino-Platform arduino-lorawan Catena-mcciadk arduino-lmic MCCI_FRAM_I2C MCCI-Catena-HS300x
+*** No repos with errors ***
+*** No existing repos skipped ***
+*** No existing repos were updated ***
+New repos cloned:
+Adafruit_BME280_Library Catena-mcciadk arduino-lorawan  Adafruit_Sensor MCCI_FRAM_I2C Catena-Arduino-Platform arduino-lmic
+
+
 ```
 
 The `git-boot.sh` script has a number of advanced options. Use `git-boot.sh -h` to get help, or look at the source code [here](https://github.com/mcci-catena/Catena-Sketches/blob/master/git-boot.sh).
@@ -133,12 +137,14 @@ The `git-boot.sh` script has a number of advanced options. Use `git-boot.sh -h` 
 
 This sketch depends on the following libraries.
 
-*  https://github.com/mcci-catena/Catena4410-Arduino-Library
+*  https://github.com/mcci-catena/Catena-Arduino-Platform
 *  https://github.com/mcci-catena/arduino-lorawan
 *  https://github.com/mcci-catena/Catena-mcciadk
 *  https://github.com/mcci-catena/arduino-lmic
 *  https://github.com/mcci-catena/MCCI_FRAM_I2C
-*  https://github.com/mcci-catena/MCCI-Catena-HS300x
+*  https://github.com/mcci-catena/Adafruit_BME280_Library
+*  https://github.com/mcci-catena/Adafruit_Sensor
+
 
 ### Build and Download
 
@@ -146,7 +152,7 @@ Shutdown the Arduino IDE and restart it, just in case.
 
 Ensure selected board is 'MCCI Catena 4610' (in the GUI, check that `Tools`>`Board "..."` says `"MCCI Catena 4610"`.
 
-In the IDE, use File>Open to load the `catena4610_simple.ino` sketch. (Remember, in step 1 you cloned `Catena-Sketches` -- find that, and navigate to `{somewhere}/Catena-Sketches/catena4610_simple/`)
+In the IDE, use File>Open to load the `Catena4610_Sensor.ino` sketch. (Remember, in step 1 you cloned `Catena4610_Sensor` -- find that, and navigate to `{somewhere}/Catena4610_Sensor/`)
 
 Follow normal Arduino IDE procedures to build the sketch: `Sketch`>`Verify/Compile`. If there are no errors, go to the next step.
 
@@ -155,6 +161,20 @@ Follow normal Arduino IDE procedures to build the sketch: `Sketch`>`Verify/Compi
 Make sure the correct port is selected in `Tools`>`Port`.
 
 Load the sketch into the Catena using `Sketch`>`Upload` and move on to provisioning.
+
+## Fsm features in Catena 4610 sensor
+
+1. The Catena4610 sensor is initially in Idle state.
+2. The current state is in no change and take it through the state initial .Here we are reset the measurements and takes it through the state inactive.
+3. Uplink timer is retriggering in this inactive state and move it to the warmup state.
+4. The device is ready to measure the data .It takes it through to the measure state.
+5. In measure state the (TPH ,Vbat ,Vboot)data has been read after some delay read the light sensor data.
+6. Finally the data has been transmitted to the lorawan and goes to sleep .Then transfer to new state and the process is repeated. 
+
+Here is the state diagram
+
+[![**FSM State Diagram](http://www.plantuml.com/plantuml/png/LL9DRzim33rRluAt0aEJRBijXw55cWuTwc9eKkmmx43RZ2rK7uP4nVE_7-sqWdk9d_ZqIBwdt4J6mCaQjRbIglHDChGjxWyb_KFR6rht1jtCg_laQjRURLNnQog-b8yGw4I1N4qGVGhoEVa0jSX1-Z91ex4DQDUgK3lVZq6t7Ol-G0HOrzxsw4RjMdXysEsV3diuQICCgw9ZxkDskzcqchjKhUNknjQrNjN8v72pcp-hsz0axVnA5c8PRMNERUBE1nbof116ABqFT0tbRlS0Enzw7t0oKVnCPeIldxzyK-h9CyMbAssnfGZQmVF-jhpRhsq360XQSYHoQg0QeSV8q-hSwNZPMplsgk2E858uKm1ac7o8Ys4OSfApb_V3DQ1hG3AggaipKaMWcCpS--NvCQu1ZjtK2IEmXugWyMuQ8HFG06jByHe6YKdIFitF8VcTqIInG8rcQkRDfjvmng2nCi9KPFombjO4ieyLqRlXkt8oh8f16sbFyZFw18FiS1N14JNKh9MwsgW_d_x2QlKT8ZyupHeDR0K_-Ls7hYMbBd-1p2xEMBC-KouS354lVdFXDmQR-dmi2MCAbC_7W2vQpRbmvmTdj7lDXNljPA1QRdPW37Eeyvq59HOMIu5Qu2qupvBt94CtSYTWoOjqkUq5YEe7CKHl2HfapCJbUdQJaGYE-4hmTfpVOi5EggNd34N7xt0QjAH4b6Du-qvZA5Y1J3c4Zu95a1cAx9bgqkVi9ZEJPlbw6Oecmufu879WFxhB_CVurGsv9bdp7m00)](http://www.plantuml.com/plantuml/svg/LL9DRzim33rRluAt0aEJRBijXw55cWuTwc9eKkmmx43RZ2rK7uP4nVE_7-sqWdk9d_ZqIBwdt4J6mCaQjRbIglHDChGjxWyb_KFR6rht1jtCg_laQjRURLNnQog-b8yGw4I1N4qGVGhoEVa0jSX1-Z91ex4DQDUgK3lVZq6t7Ol-G0HOrzxsw4RjMdXysEsV3diuQICCgw9ZxkDskzcqchjKhUNknjQrNjN8v72pcp-hsz0axVnA5c8PRMNERUBE1nbof116ABqFT0tbRlS0Enzw7t0oKVnCPeIldxzyK-h9CyMbAssnfGZQmVF-jhpRhsq360XQSYHoQg0QeSV8q-hSwNZPMplsgk2E858uKm1ac7o8Ys4OSfApb_V3DQ1hG3AggaipKaMWcCpS--NvCQu1ZjtK2IEmXugWyMuQ8HFG06jByHe6YKdIFitF8VcTqIInG8rcQkRDfjvmng2nCi9KPFombjO4ieyLqRlXkt8oh8f16sbFyZFw18FiS1N14JNKh9MwsgW_d_x2QlKT8ZyupHeDR0K_-Ls7hYMbBd-1p2xEMBC-KouS354lVdFXDmQR-dmi2MCAbC_7W2vQpRbmvmTdj7lDXNljPA1QRdPW37Eeyvq59HOMIu5Qu2qupvBt94CtSYTWoOjqkUq5YEe7CKHl2HfapCJbUdQJaGYE-4hmTfpVOi5EggNd34N7xt0QjAH4b6Du-qvZA5Y1J3c4Zu95a1cAx9bgqkVi9ZEJPlbw6Oecmufu879WFxhB_CVurGsv9bdp7m00 "Click for SVG version")
+
 
 ## Set the identity of your Catena 4610
 
@@ -184,7 +204,7 @@ If you get an error message, please follow the **Platform Provisioning** instruc
 
 The Catena 4610 has a number of build options. We have a single firmware image to support the various options. The firmware learns the build options using the platform GUID data stored in the FRAM, so if the factory settings are not present or have been lost, you need to do the following.
 
-The Catena 4610 is shipped with the catena4610_simple sketch installed, and properly provisioned with serial number and platform GUID.
+The Catena 4610 is shipped with the Catena4610_Sensor sketch installed, and properly provisioned with serial number and platform GUID.
 
 If you reset the FRAM in your Catena 4610, you will need to enter the following commands.
 
