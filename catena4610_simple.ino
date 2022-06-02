@@ -142,21 +142,29 @@ Catena::LoRaWAN gLoRaWAN;
 //
 StatusLed gLed (Catena::PIN_STATUS_LED);
 
-//   The temperature/humidity sensor
-Adafruit_BME280 gBme; // The default initalizer creates an I2C connection
-bool fBme;
+// board revsion
+const int Rev = getRev();
 
-//   The LUX sensor
-Catena_Si1133 gSi1133;
-bool fLight;
+if (Rev < 3)
+        {
+        //   The temperature/humidity sensor
+        Adafruit_BME280 gBme; // The default initalizer creates an I2C connection
+        bool fTemperature;
 
-// STH temperature sensor/humidity Sensor
-cTemperatureSensor gTemperatureSensor {Wire};
-bool fTemperatureSensor;
+        //   The LUX sensor
+        Catena_Si1133 gSi1133;
+        bool fLight;
+        }
+else
+        {
+        // STH temperature sensor/humidity Sensor
+        cTemperatureSensor gTemperatureSensor {Wire};
+        bool fTemperature;
 
-// LTR329 LUX sensor
-MCCI_Catena_LTR329 gLTR329;
-bool fLtr;
+        // LTR329 LUX sensor
+        MCCI_Catena_LTR329 gLTR329;
+        bool fLight;
+        }
 
 SPIClass gSPI2(
                 Catena::PIN_SPI2_MOSI,
@@ -182,9 +190,6 @@ void sensorJob_cb(osjob_t *pJob);
 unsigned gTxCycle;
 // remaining before we reset to default
 unsigned gTxCycleCount;
-
-// board revsion
-const int Rev = getRev();
 
 /*
 
@@ -215,12 +220,20 @@ void setup(void)
         gCatena.begin();
 
         setup_platform();
-        setup_light();
-        setup_bme280();
+
+        if (Rev < 3)
+                {
+                setup_bme280();
+                setup_light();
+                }
+        else
+                {
+                setup_ltr329();
+                setup_sth();
+                }
+
         setup_flash();
         setup_uplink();
-        setup_ltr329();
-        setup_sth();
         }
 
 void setup_platform(void)
@@ -242,9 +255,9 @@ void setup_platform(void)
                 {
                 char sRegion[16];
                 gCatena.SafePrintf("Target network: %s / %s\n",
-                                gLoRaWAN.GetNetworkName(),
-                                gLoRaWAN.GetRegionString(sRegion, sizeof(sRegion))
-                                );
+                        gLoRaWAN.GetNetworkName(),
+                        gLoRaWAN.GetRegionString(sRegion, sizeof(sRegion))
+                        );
                 }
         gCatena.SafePrintf("Enter 'help' for a list of commands.\n");
         gCatena.SafePrintf("(remember to select 'Line Ending: Newline' at the bottom of the monitor window.)\n");
@@ -339,11 +352,11 @@ void setup_bme280(void)
         {
         if (gBme.begin(BME280_ADDRESS, Adafruit_BME280::OPERATING_MODE::Sleep))
                 {
-                fBme = true;
+                fTemperature = true;
                 }
         else
                 {
-                fBme = false;
+                fTemperature = false;
                 gCatena.SafePrintf("No BME280 found: check hardware\n");
                 }
         }
@@ -369,11 +382,11 @@ void setup_sth(void)
         {
         if (gTemperatureSensor.begin())
                 {
-                fTemperatureSensor = true;
+                fTemperature = true;
                 }
         else
                 {
-                fTemperatureSensor = false;
+                fTemperature = false;
                 gCatena.SafePrintf("No temperature/humidity sensor found: check hardware\n");
                 }
         }
@@ -382,11 +395,11 @@ void setup_ltr(void)
         {
         if (gLTR329.begin())
                 {
-                fLtr = true;
+                fLight = true;
                 }
         else
                 {
-                fLtr = false;
+                fLight = false;
                 gCatena.SafePrintf("No Light sensor found: check hardware\n");
                 }
         }
@@ -472,19 +485,19 @@ void fillBuffer(TxBuffer_t &b)
 
         if (Rev < 3)
                 {
-                if (fBme)
+                if (fTemperature)
                         {
                         Adafruit_BME280::Measurements m = gBme.readTemperaturePressureHumidity();
-                                // temperature is 2 bytes from -0x80.00 to +0x7F.FF degrees C
+                        // temperature is 2 bytes from -0x80.00 to +0x7F.FF degrees C
                         // pressure is 2 bytes, hPa * 10.
                         // humidity is one byte, where 0 == 0/256 and 0xFF == 255/256.
-                                gCatena.SafePrintf(
-                                "BME280:  T: %d P: %d RH: %d\n",
+                        gCatena.SafePrintf(
+                        "BME280:  T: %d P: %d RH: %d\n",
                                 (int) m.Temperature,
                                 (int) m.Pressure,
-                                        (int) m.Humidity
-                                        );
-                                b.putT(m.Temperature);
+                                (int) m.Humidity
+                                );
+                        b.putT(m.Temperature);
                         b.putP(m.Pressure);
                         b.putRH(m.Humidity);
 
@@ -510,12 +523,13 @@ void fillBuffer(TxBuffer_t &b)
                                 data[2]
                                 );
                         b.putLux(data[1]);
+
                         flag |= FlagsSensor2::FlagLux;
                         }
                 }
         else
                 {
-                if (fTemperatureSensor)
+                if (fTemperature)
                         {
                         cTemperatureSensor::Measurements m;
                         bool fResult = gTemperatureSensor.getTemperatureHumidity(m);
@@ -534,7 +548,7 @@ void fillBuffer(TxBuffer_t &b)
                                 // no method for 2-byte RH, direct encode it.
                                 b.put2uf((m.Humidity / 100.0f) * 65535.0f);
 
-                                flag |= FlagsSensorPort3::FlagTH;
+                                flag |= FlagsSensor2::FlagTPH;
                                 }
                         }
                 else
@@ -545,7 +559,7 @@ void fillBuffer(TxBuffer_t &b)
                         }
                 }
 
-                if (fLtr)
+                if (fLight)
                         {
                         float lux;
                         lux = gLtr329.readLux();
@@ -554,7 +568,8 @@ void fillBuffer(TxBuffer_t &b)
                                 lux
                                 );
                         b.putLux(lux);
-                        flag |= FlagsSensorPort3::FlagLux;
+
+                        flag |= FlagsSensor2::FlagLux;
                         }
 
                 *pFlag = uint8_t(flag);
