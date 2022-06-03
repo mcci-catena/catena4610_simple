@@ -119,7 +119,7 @@ static constexpr const char *filebasename(const char *s)
 |
 \****************************************************************************/
 
-static const char sVersion[] = "0.2.0";
+static const char sVersion[] = "0.2.1";
 
 /****************************************************************************\
 |
@@ -143,28 +143,24 @@ Catena::LoRaWAN gLoRaWAN;
 StatusLed gLed (Catena::PIN_STATUS_LED);
 
 // board revsion
-const int Rev = getRev();
+FlashParamsStm32L0_t::ParamBoard_t gParam;
+const uint8_t Rev = gParam.getRev();
 
-if (Rev < 3)
-        {
-        //   The temperature/humidity sensor
-        Adafruit_BME280 gBme; // The default initalizer creates an I2C connection
-        bool fTemperature;
+//   The temperature/humidity sensor
+Adafruit_BME280 gBme; // The default initalizer creates an I2C connection
 
-        //   The LUX sensor
-        Catena_Si1133 gSi1133;
-        bool fLight;
-        }
-else
-        {
-        // STH temperature sensor/humidity Sensor
-        cTemperatureSensor gTemperatureSensor {Wire};
-        bool fTemperature;
+//   The LUX sensor
+Catena_Si1133 gSi1133;
 
-        // LTR329 LUX sensor
-        MCCI_Catena_LTR329 gLTR329;
-        bool fLight;
-        }
+//   SHT temperature sensor/humidity Sensor
+using cTemperatureSensor = McciCatenaSht3x::cSHT3x;
+cTemperatureSensor gTemperatureSensor {Wire};
+
+//   LTR329 LUX sensor
+McciCatenaLtr329::cLTR329 gLTR329 {Wire};  
+
+bool fTemperature;
+bool fLight;
 
 SPIClass gSPI2(
                 Catena::PIN_SPI2_MOSI,
@@ -229,7 +225,7 @@ void setup(void)
         else
                 {
                 setup_ltr329();
-                setup_sth();
+                setup_sht3x();
                 }
 
         setup_flash();
@@ -378,7 +374,7 @@ void setup_flash(void)
                 }
         }
 
-void setup_sth(void)
+void setup_sht3x(void)
         {
         if (gTemperatureSensor.begin())
                 {
@@ -391,7 +387,7 @@ void setup_sth(void)
                 }
         }
 
-void setup_ltr(void)
+void setup_ltr329(void)
         {
         if (gLTR329.begin())
                 {
@@ -451,7 +447,7 @@ void loop()
 
 void fillBuffer(TxBuffer_t &b)
         {
-        if (fLight)
+        if (fLight && Rev < 3)
                 {
                 gSi1133.start(true);
                 }
@@ -557,12 +553,11 @@ void fillBuffer(TxBuffer_t &b)
                                 "Env sensor not found\n"
                                 );
                         }
-                }
 
                 if (fLight)
                         {
                         float lux;
-                        lux = gLtr329.readLux();
+                        lux = gLTR329.readLux();
                         gCatena.SafePrintf(
                                 "LTR329: %f Lux\n",
                                 lux
@@ -571,8 +566,9 @@ void fillBuffer(TxBuffer_t &b)
 
                         flag |= FlagsSensor2::FlagLux;
                         }
+                }
 
-                *pFlag = uint8_t(flag);
+        *pFlag = uint8_t(flag);
         }
 
 void startSendingUplink(void)
