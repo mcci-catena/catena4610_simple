@@ -144,7 +144,7 @@ StatusLed gLed (Catena::PIN_STATUS_LED);
 
 // board revsion
 FlashParamsStm32L0_t::ParamBoard_t gParam;
-const uint8_t Rev = gParam.getRev();
+uint8_t Rev;
 
 //   The temperature/humidity sensor
 Adafruit_BME280 gBme; // The default initalizer creates an I2C connection
@@ -216,6 +216,10 @@ void setup(void)
         gCatena.begin();
 
         setup_platform();
+        setup_flash();
+        // gParam.setRev(3);
+        Rev = gParam.getRev();
+        gCatena.SafePrintf("Rev: %d\n", Rev);
 
         if (Rev < 3)
                 {
@@ -228,7 +232,6 @@ void setup(void)
                 setup_sht3x();
                 }
 
-        setup_flash();
         setup_uplink();
         }
 
@@ -556,11 +559,10 @@ void fillBuffer(TxBuffer_t &b)
 
                 if (fLight)
                         {
-                        float lux;
-                        lux = gLTR329.readLux();
+                        float lux = gLTR329.readLux();
                         gCatena.SafePrintf(
-                                "LTR329: %f Lux\n",
-                                lux
+                                "LTR329: %d Lux\n",
+                                (int)lux
                                 );
                         b.putLux(lux);
 
