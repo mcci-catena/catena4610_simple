@@ -30,9 +30,13 @@ Author:
 #include <Adafruit_BME280.h>
 #include <Arduino_LoRaWAN.h>
 #include <Catena_Si1133.h>
+#include <Catena-SHT3x.h>
+#include <MCCI_Catena_LTR329.h>
+
 #include <lmic.h>
 #include <hal/hal.h>
 #include <mcciadk_baselib.h>
+#include <Catena_FlashParam.h>
 
 #include <cmath>
 #include <type_traits>
@@ -115,7 +119,7 @@ static constexpr const char *filebasename(const char *s)
 |
 \****************************************************************************/
 
-static const char sVersion[] = "0.2.0";
+static const char sVersion[] = "0.3.0";
 
 /****************************************************************************\
 |
@@ -138,12 +142,24 @@ Catena::LoRaWAN gLoRaWAN;
 //
 StatusLed gLed (Catena::PIN_STATUS_LED);
 
+// board revsion
+FlashParamsStm32L0_t::ParamBoard_t gParam;
+uint8_t Rev;
+
 //   The temperature/humidity sensor
 Adafruit_BME280 gBme; // The default initalizer creates an I2C connection
-bool fBme;
 
 //   The LUX sensor
 Catena_Si1133 gSi1133;
+
+//   SHT temperature sensor/humidity Sensor
+using cTemperatureSensor = McciCatenaSht3x::cSHT3x;
+cTemperatureSensor gTemperatureSensor {Wire};
+
+//   LTR329 LUX sensor
+McciCatenaLtr329::cLTR329 gLTR329 {Wire};  
+
+bool fTemperature;
 bool fLight;
 
 SPIClass gSPI2(
@@ -152,7 +168,7 @@ SPIClass gSPI2(
                 Catena::PIN_SPI2_SCK
                 );
 
-//   The flash
+//  The flash
 Catena_Mx25v8035f gFlash;
 bool fFlash;
 
@@ -170,8 +186,6 @@ void sensorJob_cb(osjob_t *pJob);
 unsigned gTxCycle;
 // remaining before we reset to default
 unsigned gTxCycleCount;
-
-
 
 /*
 
@@ -202,9 +216,22 @@ void setup(void)
         gCatena.begin();
 
         setup_platform();
-        setup_light();
-        setup_bme280();
         setup_flash();
+
+        Rev = gParam.getRev();
+        gCatena.SafePrintf("Rev: %d\n", Rev);
+
+        if (Rev < 3)
+                {
+                setup_bme280();
+                setup_light();
+                }
+        else
+                {
+                setup_ltr329();
+                setup_sht3x();
+                }
+
         setup_uplink();
         }
 
@@ -227,9 +254,9 @@ void setup_platform(void)
                 {
                 char sRegion[16];
                 gCatena.SafePrintf("Target network: %s / %s\n",
-                                gLoRaWAN.GetNetworkName(),
-                                gLoRaWAN.GetRegionString(sRegion, sizeof(sRegion))
-                                );
+                        gLoRaWAN.GetNetworkName(),
+                        gLoRaWAN.GetRegionString(sRegion, sizeof(sRegion))
+                        );
                 }
         gCatena.SafePrintf("Enter 'help' for a list of commands.\n");
         gCatena.SafePrintf("(remember to select 'Line Ending: Newline' at the bottom of the monitor window.)\n");
@@ -324,11 +351,11 @@ void setup_bme280(void)
         {
         if (gBme.begin(BME280_ADDRESS, Adafruit_BME280::OPERATING_MODE::Sleep))
                 {
-                fBme = true;
+                fTemperature = true;
                 }
         else
                 {
-                fBme = false;
+                fTemperature = false;
                 gCatena.SafePrintf("No BME280 found: check hardware\n");
                 }
         }
@@ -347,6 +374,32 @@ void setup_flash(void)
                 gFlash.end();
                 gSPI2.end();
                 gCatena.SafePrintf("No FLASH found: check hardware\n");
+                }
+        }
+
+void setup_sht3x(void)
+        {
+        if (gTemperatureSensor.begin())
+                {
+                fTemperature = true;
+                }
+        else
+                {
+                fTemperature = false;
+                gCatena.SafePrintf("No temperature/humidity sensor found: check hardware\n");
+                }
+        }
+
+void setup_ltr329(void)
+        {
+        if (gLTR329.begin())
+                {
+                fLight = true;
+                }
+        else
+                {
+                fLight = false;
+                gCatena.SafePrintf("No Light sensor found: check hardware\n");
                 }
         }
 
@@ -397,8 +450,10 @@ void loop()
 
 void fillBuffer(TxBuffer_t &b)
         {
-        if (fLight)
+        if (fLight && Rev < 3)
+                {
                 gSi1133.start(true);
+                }
 
         b.begin();
         FlagsSensor2 flag;
@@ -427,47 +482,92 @@ void fillBuffer(TxBuffer_t &b)
                 flag |= FlagsSensor2::FlagBoot;
                 }
 
-        if (fBme)
+        if (Rev < 3)
                 {
-                Adafruit_BME280::Measurements m = gBme.readTemperaturePressureHumidity();
+                if (fTemperature)
+                        {
+                        Adafruit_BME280::Measurements m = gBme.readTemperaturePressureHumidity();
                         // temperature is 2 bytes from -0x80.00 to +0x7F.FF degrees C
-                // pressure is 2 bytes, hPa * 10.
-                // humidity is one byte, where 0 == 0/256 and 0xFF == 255/256.
+                        // pressure is 2 bytes, hPa * 10.
+                        // humidity is one byte, where 0 == 0/256 and 0xFF == 255/256.
                         gCatena.SafePrintf(
                         "BME280:  T: %d P: %d RH: %d\n",
-                        (int) m.Temperature,
-                        (int) m.Pressure,
+                                (int) m.Temperature,
+                                (int) m.Pressure,
                                 (int) m.Humidity
                                 );
                         b.putT(m.Temperature);
-                b.putP(m.Pressure);
-                b.putRH(m.Humidity);
+                        b.putP(m.Pressure);
+                        b.putRH(m.Humidity);
 
-                flag |= FlagsSensor2::FlagTPH;
-                }
-
-        if (fLight)
-                {
-                /* Get a new sensor event */
-                uint16_t data[3];
-
-                while (! gSi1133.isOneTimeReady())
-                        {
-                        yield();
+                        flag |= FlagsSensor2::FlagTPH;
                         }
 
-                gSi1133.readMultiChannelData(data, 3);
-                gSi1133.stop();
-                gCatena.SafePrintf(
-                        "Si1133:  %u IR, %u White, %u UV\n",
-                        data[0],
-                        data[1],
-                        data[2]
-                        );
-                b.putLux(data[1]);
-                flag |= FlagsSensor2::FlagLux;
-                }
+                if (fLight)
+                        {
+                        /* Get a new sensor event */
+                        uint16_t data[3];
 
+                        while (! gSi1133.isOneTimeReady())
+                                {
+                                yield();
+                                }
+
+                        gSi1133.readMultiChannelData(data, 3);
+                        gSi1133.stop();
+                        gCatena.SafePrintf(
+                                "Si1133:  %u IR, %u White, %u UV\n",
+                                data[0],
+                                data[1],
+                                data[2]
+                                );
+                        b.putLux(data[1]);
+
+                        flag |= FlagsSensor2::FlagLux;
+                        }
+                }
+        else
+                {
+                if (fTemperature)
+                        {
+                        cTemperatureSensor::Measurements m;
+                        bool fResult = gTemperatureSensor.getTemperatureHumidity(m);
+
+                        if (fResult)
+                                {
+                                // temperature is 2 bytes from -0x80.00 to +0x7F.FF degrees C
+                                // humidity is 2 bytes, where 0 == 0/0xFFFF and 0xFFFFF == 1.
+                                gCatena.SafePrintf(
+                                        "Env:  T: %d RH: %d\n",
+                                        (int) (m.Temperature + 0.5f),
+                                        (int) m.Humidity
+                                        );
+                                b.putT(m.Temperature);
+                                b.putP(0x0000);
+                                b.putRH(m.Humidity);
+
+                                flag |= FlagsSensor2::FlagTPH;
+                                }
+                        }
+                else
+                        {
+                        gCatena.SafePrintf(
+                                "Env sensor not found\n"
+                                );
+                        }
+
+                if (fLight)
+                        {
+                        float lux = gLTR329.readLux();
+                        gCatena.SafePrintf(
+                                "LTR329: %d Lux\n",
+                                (int)lux
+                                );
+                        b.putLux(lux);
+
+                        flag |= FlagsSensor2::FlagLux;
+                        }
+                }
 
         *pFlag = uint8_t(flag);
         }
