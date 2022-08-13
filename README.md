@@ -35,7 +35,7 @@ The Catena 4610 is a single-board LoRaWAN-enabled sensor device with the followi
 - Bosch BME280 temperature, pressure, and humidity sensor
 - Silicon Labs Si1133 light sensor
 
-Documents on the MCCI Catena 46101 are at https://github.com/mcci-catena/HW-Designs/tree/master/Boards/Catena-4610.
+Documents on the MCCI Catena 4610 are at https://github.com/mcci-catena/HW-Designs/tree/master/Boards/Catena-4610.
 
 ## Getting Started
 
@@ -279,7 +279,7 @@ Early versions of the MCCI BSP do not include an INF file (Windows) or sample ru
 
 You may also refer to the detailed procedures that are part of the Catena 4610 user manual. Please see:
 
-- [Catena 4610 User Manual](https://github.com/mcci-catena/HW-Designs/blob/master/Boards/Catena-4610/234001177a_(Catena-4610-User-Manual).pdf).
+- [Catena 4610 User Manual](https://github.com/mcci-catena/HW-Designs/blob/master/Boards/Catena-4610/234001177b_(Catena-4610-User-Manual).pdf).
 
 ### Data Format
 
