@@ -6,7 +6,7 @@ Function:
         Sensor program for Catena 4610.
 
 Copyright notice:
-        This file copyright (C) 2019 by
+        This file copyright (C) 2023 by
 
                 MCCI Corporation
                 3520 Krums Corners Road
@@ -15,7 +15,7 @@ Copyright notice:
         See project LICENSE file for license information.
 
 Author:
-        Terry Moore, MCCI Corporation	June 2019
+        Terry Moore, MCCI Corporation	April 2023
 
 */
 
@@ -31,17 +31,19 @@ Author:
 #include <Arduino_LoRaWAN.h>
 #include <Catena_Si1133.h>
 #include <Catena-SHT3x.h>
-#include <MCCI_Catena_LTR329.h>
+#include <mcci_ltr_329als.h>
 
 #include <lmic.h>
 #include <hal/hal.h>
 #include <mcciadk_baselib.h>
 #include <Catena_FlashParam.h>
+#include <Catena_Log.h>
 
 #include <cmath>
 #include <type_traits>
 
 using namespace McciCatena;
+using namespace Mcci_Ltr_329als;
 
 /****************************************************************************\
 |
@@ -119,7 +121,7 @@ static constexpr const char *filebasename(const char *s)
 |
 \****************************************************************************/
 
-static const char sVersion[] = "0.2.1";
+static const char sVersion[] = "0.2.2";
 
 /****************************************************************************\
 |
@@ -142,9 +144,33 @@ Catena::LoRaWAN gLoRaWAN;
 //
 StatusLed gLed (Catena::PIN_STATUS_LED);
 
-// board revsion
-FlashParamsStm32L0_t::ParamBoard_t gParam;
-uint8_t Rev;
+// concrete type for flash parameters
+using Flash_t = McciCatena::FlashParamsStm32L0_t;
+using ParamBoard_t = Flash_t::ParamBoard_t;
+using PageEndSignature1_t = Flash_t::PageEndSignature1_t;
+using ParamDescId = Flash_t::ParamDescId;
+
+// flag to disable LED
+bool fDisableLED;
+
+// set flag if Network time set to RTC
+bool fNwTimeSet;
+
+// set start time when network time is being set
+std::uint32_t startTime;
+
+// get Rev number
+std::uint8_t boardRev;
+
+// fetch the signature
+const PageEndSignature1_t * const pRomSig =
+        reinterpret_cast<const PageEndSignature1_t *>(Flash_t::kPageEndSignature1Address);
+
+// get pointer to memory block */
+uint32_t descAddr = pRomSig->getParamPointer();
+
+// find the serial number (must be first)
+const ParamBoard_t * const pBoard = reinterpret_cast<const ParamBoard_t *>(descAddr);
 
 //   The temperature/humidity sensor
 Adafruit_BME280 gBme; // The default initalizer creates an I2C connection
@@ -157,7 +183,8 @@ using cTemperatureSensor = McciCatenaSht3x::cSHT3x;
 cTemperatureSensor gTemperatureSensor {Wire};
 
 //   LTR329 LUX sensor
-McciCatenaLtr329::cLTR329 gLTR329 {Wire};  
+Ltr_329als gLtr {Wire};
+Mcci_Ltr_329als_Regs::AlsContr_t gAlsCtrl;
 
 bool fTemperature;
 bool fLight;
@@ -217,11 +244,9 @@ void setup(void)
 
         setup_platform();
         setup_flash();
-        // gParam.setRev(3);
-        Rev = gParam.getRev();
-        gCatena.SafePrintf("Rev: %d\n", Rev);
+        setup_rev();
 
-        if (Rev < 3)
+        if (!isVersion2())
                 {
                 setup_bme280();
                 setup_light();
@@ -331,6 +356,20 @@ void setup_platform(void)
                 }
         }
 
+void setup_rev()
+        {
+        if (!flashParam())
+                {
+                gCatena.SafePrintf(
+                        "**Unable to fetch flash parameters, assuming 4610 version 1 (rev C or earlier)!\n"
+                        );
+                boardRev = 2;
+                }
+        else {
+                printBoardInfo();
+                }
+        }
+
 void setup_light(void)
         {
         if (gSi1133.begin())
@@ -392,14 +431,15 @@ void setup_sht3x(void)
 
 void setup_ltr329(void)
         {
-        if (gLTR329.begin())
+        if (! gLtr.begin())
                 {
-                fLight = true;
+                gCatena.SafePrintf("gLtr.begin() failed\n");
+                fLight = false;
                 }
         else
                 {
-                fLight = false;
-                gCatena.SafePrintf("No Light sensor found: check hardware\n");
+                gCatena.SafePrintf("gLtr.begin() successful\n");
+                fLight = true;
                 }
         }
 
@@ -450,7 +490,7 @@ void loop()
 
 void fillBuffer(TxBuffer_t &b)
         {
-        if (fLight && Rev < 3)
+        if (fLight && !isVersion2())
                 {
                 gSi1133.start(true);
                 }
@@ -482,7 +522,7 @@ void fillBuffer(TxBuffer_t &b)
                 flag |= FlagsSensor2::FlagBoot;
                 }
 
-        if (Rev < 3)
+        if (!isVersion2())
                 {
                 if (fTemperature)
                         {
@@ -498,7 +538,8 @@ void fillBuffer(TxBuffer_t &b)
                                 );
                         b.putT(m.Temperature);
                         b.putP(m.Pressure);
-                        b.putRH(m.Humidity);
+                        // no method for 2-byte RH, directly encode it.
+                        b.put2uf((m.Humidity / 100.0f) * 65535.0f);
 
                         flag |= FlagsSensor2::FlagTPH;
                         }
@@ -521,7 +562,7 @@ void fillBuffer(TxBuffer_t &b)
                                 data[1],
                                 data[2]
                                 );
-                        b.putLux(data[1]);
+                        b.putLux(LMIC_f2uflt16(data[1] / pow(2.0, 24)));
 
                         flag |= FlagsSensor2::FlagLux;
                         }
@@ -543,8 +584,7 @@ void fillBuffer(TxBuffer_t &b)
                                         (int) m.Humidity
                                         );
                                 b.putT(m.Temperature);
-
-                                // no method for 2-byte RH, direct encode it.
+                                // no method for 2-byte RH, directly encode it.
                                 b.put2uf((m.Humidity / 100.0f) * 65535.0f);
 
                                 flag |= FlagsSensor2::FlagTPH;
@@ -559,14 +599,53 @@ void fillBuffer(TxBuffer_t &b)
 
                 if (fLight)
                         {
-                        float lux = gLTR329.readLux();
-                        gCatena.SafePrintf(
-                                "LTR329: %d Lux\n",
-                                (int)lux
-                                );
-                        b.putLux(lux);
+                        bool fError;
+                        static constexpr float kMax_Gain_96 = 640.0f;
+                        static constexpr float kMax_Gain_48 = 1280.0f;
+                        static constexpr float kMax_Gain_8 = 7936.0f;
+                        static constexpr float kMax_Gain_4 = 16128.0f;
+                        static constexpr float kMax_Gain_2 = 32512.0f;
+                        static constexpr float kMax_Gain_1 = 65535.0f;
 
-                        flag |= FlagsSensor2::FlagLux;
+                        // start a measurement
+                        if (! gLtr.startSingleMeasurement())
+                                gCatena.SafePrintf("gLtr.startSingleMeasurement() failed\n");
+
+                        // wait for measurement to complete.
+                        while (! gLtr.queryReady(fError))
+                                {
+                                if (fError)
+                                        break;
+                                }
+
+                        if (fError)
+                                {
+                                gCatena.SafePrintf("queryReady() failed\n");
+                                }
+                        else
+                                {
+                                float currentLux = gLtr.getLux();
+                                gCatena.SafePrintf(
+                                        "LTR329: %d Lux\n",
+                                        (int)currentLux
+                                        );
+                                b.put3f(currentLux);
+
+                                if (currentLux <= kMax_Gain_96)
+                                        gAlsCtrl.setGain(96);
+                                else if (currentLux <= kMax_Gain_48)
+                                        gAlsCtrl.setGain(48);
+                                else if (currentLux <= kMax_Gain_8)
+                                        gAlsCtrl.setGain(8);
+                                else if (currentLux <= kMax_Gain_4)
+                                        gAlsCtrl.setGain(4);
+                                else if (currentLux <= kMax_Gain_2)
+                                        gAlsCtrl.setGain(2);
+                                else
+                                        gAlsCtrl.setGain(1);
+
+                                flag |= FlagsSensor2::FlagLux;
+                                }
                         }
                 }
 
@@ -907,3 +986,77 @@ void setTxCycleTime(
         gTxCycle = txCycle;
         gTxCycleCount = txCount;
         }
+
+bool flashParam()
+    {
+    const auto guid { Flash_t::kPageEndSignature1_Guid };
+
+    if (std::memcmp((const void *) &pRomSig->Guid, (const void *) &guid, sizeof(pRomSig->Guid)) != 0)
+        {
+        return false;
+        }
+
+    if (! pRomSig->isValidParamPointer(descAddr))
+        {
+        return false;
+        }
+
+    // check the ID and length
+    if (! (
+        pBoard->uLen == sizeof(*pBoard) &&
+        pBoard->uType == unsigned(ParamDescId::Board)
+        ))
+        {
+        return false;
+        }
+
+    boardRev = pBoard->getRev();
+    return true;
+    }
+
+void printBoardInfo()
+    {
+    // print the s/n, model, rev
+    gLog.printf(gLog.kInfo, "serial-number:");
+    uint8_t serial[pBoard->nSerial];
+    pBoard->getSerialNumber(serial);
+
+    for (unsigned i = 0; i < sizeof(serial); ++i)
+        gCatena.SafePrintf("%c%02x", i == 0 ? ' ' : '-', serial[i]);
+
+    gLog.printf(
+            gLog.kInfo,
+            "\nAssembly-number: %u\nModel: %u\n",
+            pBoard->getAssembly(),
+            pBoard->getModel()
+            );
+    delay(1);
+    gLog.printf(
+            gLog.kInfo,
+            "ModNumber: %u\n",
+            pBoard->getModNumber()
+            );
+    gLog.printf(
+            gLog.kInfo,
+            "RevNumber: %u\n",
+            boardRev
+            );
+    gLog.printf(
+            gLog.kInfo,
+            "Rev: %c\n",
+            pBoard->getRevChar()
+            );
+    gLog.printf(
+            gLog.kInfo,
+            "Dash: %u\n",
+            pBoard->getDash()
+            );
+    }
+
+bool isVersion2()
+    {
+    if (boardRev < 3)
+        return false;
+    else
+        return true;
+    }
