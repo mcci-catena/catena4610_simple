@@ -103,16 +103,16 @@ static Arduino_LoRaWAN::ReceivePortBufferCbFn receiveMessage;
 // two-argument version: first arg is what to return if we don't find
 // a directory separator in the second part.
 static constexpr const char *filebasename(const char *s, const char *p)
-    {
-    return p[0] == '\0'                     ? s                            :
-           (p[0] == '/' || p[0] == '\\')    ? filebasename(p + 1, p + 1)   :
-                                              filebasename(s, p + 1)       ;
-    }
+        {
+        return p[0] == '\0'                     ? s                            :
+                (p[0] == '/' || p[0] == '\\')    ? filebasename(p + 1, p + 1)   :
+                                                filebasename(s, p + 1)       ;
+        }
 
 static constexpr const char *filebasename(const char *s)
-    {
-    return filebasename(s, s);
-    }
+        {
+        return filebasename(s, s);
+        }
 
 
 /****************************************************************************\
@@ -378,11 +378,12 @@ void setup_light(void)
                 gSi1133.configure(0, CATENA_SI1133_MODE_SmallIR);
                 gSi1133.configure(1, CATENA_SI1133_MODE_White);
                 gSi1133.configure(2, CATENA_SI1133_MODE_UV);
+                gCatena.SafePrintf("Light sensor found\n");
                 }
         else
                 {
                 fLight = false;
-                gCatena.SafePrintf("No Si1133 found: check hardware\n");
+                gCatena.SafePrintf("No Light sensor found: check hardware\n");
                 }
         }
 
@@ -391,11 +392,12 @@ void setup_bme280(void)
         if (gBme.begin(BME280_ADDRESS, Adafruit_BME280::OPERATING_MODE::Sleep))
                 {
                 fTemperature = true;
+                gCatena.SafePrintf("Temperature/Humidity sensor found\n");
                 }
         else
                 {
                 fTemperature = false;
-                gCatena.SafePrintf("No BME280 found: check hardware\n");
+                gCatena.SafePrintf("No Temperature/Humidity sensor found: check hardware\n");
                 }
         }
 
@@ -421,11 +423,12 @@ void setup_sht3x(void)
         if (gTemperatureSensor.begin())
                 {
                 fTemperature = true;
+                gCatena.SafePrintf("Temperature/Humidity sensor found\n");
                 }
         else
                 {
                 fTemperature = false;
-                gCatena.SafePrintf("No temperature/humidity sensor found: check hardware\n");
+                gCatena.SafePrintf("No Temperature/Humidity sensor found: check hardware\n");
                 }
         }
 
@@ -433,12 +436,12 @@ void setup_ltr329(void)
         {
         if (! gLtr.begin())
                 {
-                gCatena.SafePrintf("gLtr.begin() failed\n");
+                gCatena.SafePrintf("No Light sensor found: check hardware\n");
                 fLight = false;
                 }
         else
                 {
-                gCatena.SafePrintf("gLtr.begin() successful\n");
+                gCatena.SafePrintf("Light sensor found\n");
                 fLight = true;
                 }
         }
@@ -988,75 +991,75 @@ void setTxCycleTime(
         }
 
 bool flashParam()
-    {
-    const auto guid { Flash_t::kPageEndSignature1_Guid };
-
-    if (std::memcmp((const void *) &pRomSig->Guid, (const void *) &guid, sizeof(pRomSig->Guid)) != 0)
         {
-        return false;
-        }
+        const auto guid { Flash_t::kPageEndSignature1_Guid };
 
-    if (! pRomSig->isValidParamPointer(descAddr))
-        {
-        return false;
-        }
+        if (std::memcmp((const void *) &pRomSig->Guid, (const void *) &guid, sizeof(pRomSig->Guid)) != 0)
+                {
+                return false;
+                }
 
-    // check the ID and length
-    if (! (
-        pBoard->uLen == sizeof(*pBoard) &&
-        pBoard->uType == unsigned(ParamDescId::Board)
-        ))
-        {
-        return false;
-        }
+        if (! pRomSig->isValidParamPointer(descAddr))
+                {
+                return false;
+                }
 
-    boardRev = pBoard->getRev();
-    return true;
-    }
+        // check the ID and length
+        if (! (
+                pBoard->uLen == sizeof(*pBoard) &&
+                pBoard->uType == unsigned(ParamDescId::Board)
+                ))
+                {
+                return false;
+                }
+
+        boardRev = pBoard->getRev();
+        return true;
+        }
 
 void printBoardInfo()
-    {
-    // print the s/n, model, rev
-    gLog.printf(gLog.kInfo, "serial-number:");
-    uint8_t serial[pBoard->nSerial];
-    pBoard->getSerialNumber(serial);
+        {
+        // print the s/n, model, rev
+        gLog.printf(gLog.kInfo, "serial-number:");
+        uint8_t serial[pBoard->nSerial];
+        pBoard->getSerialNumber(serial);
 
-    for (unsigned i = 0; i < sizeof(serial); ++i)
-        gCatena.SafePrintf("%c%02x", i == 0 ? ' ' : '-', serial[i]);
+        for (unsigned i = 0; i < sizeof(serial); ++i)
+                gCatena.SafePrintf("%c%02x", i == 0 ? ' ' : '-', serial[i]);
 
-    gLog.printf(
-            gLog.kInfo,
-            "\nAssembly-number: %u\nModel: %u\n",
-            pBoard->getAssembly(),
-            pBoard->getModel()
-            );
-    delay(1);
-    gLog.printf(
-            gLog.kInfo,
-            "ModNumber: %u\n",
-            pBoard->getModNumber()
-            );
-    gLog.printf(
-            gLog.kInfo,
-            "RevNumber: %u\n",
-            boardRev
-            );
-    gLog.printf(
-            gLog.kInfo,
-            "Rev: %c\n",
-            pBoard->getRevChar()
-            );
-    gLog.printf(
-            gLog.kInfo,
-            "Dash: %u\n",
-            pBoard->getDash()
-            );
-    }
+        gLog.printf(
+                gLog.kInfo,
+                "\nAssembly-number: %u\nModel: %u\n",
+                pBoard->getAssembly(),
+                pBoard->getModel()
+                );
+        delay(1);
+        gLog.printf(
+                gLog.kInfo,
+                "ModNumber: %u\n",
+                pBoard->getModNumber()
+                );
+        gLog.printf(
+                gLog.kInfo,
+                "RevNumber: %u\n",
+                boardRev
+                );
+        gLog.printf(
+                gLog.kInfo,
+                "Rev: %c\n",
+                pBoard->getRevChar()
+                );
+        gLog.printf(
+                gLog.kInfo,
+                "Dash: %u\n",
+                pBoard->getDash()
+                );
+        }
 
 bool isVersion2()
-    {
-    if (boardRev < 3)
-        return false;
-    else
-        return true;
-    }
+        {
+        if (boardRev < 3)
+                return false;
+        else
+                return true;
+        }
