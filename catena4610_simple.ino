@@ -6,7 +6,7 @@ Function:
         Sensor program for Catena 4610.
 
 Copyright notice:
-        This file copyright (C) 2023 by
+        This file copyright (C) 2019 - 2023 by
 
                 MCCI Corporation
                 3520 Krums Corners Road
@@ -15,7 +15,7 @@ Copyright notice:
         See project LICENSE file for license information.
 
 Author:
-        Terry Moore, MCCI Corporation	April 2023
+        Terry Moore, MCCI Corporation	June 2019
 
 */
 
@@ -105,8 +105,8 @@ static Arduino_LoRaWAN::ReceivePortBufferCbFn receiveMessage;
 static constexpr const char *filebasename(const char *s, const char *p)
         {
         return p[0] == '\0'                     ? s                            :
-                (p[0] == '/' || p[0] == '\\')    ? filebasename(p + 1, p + 1)   :
-                                                filebasename(s, p + 1)       ;
+                (p[0] == '/' || p[0] == '\\')   ? filebasename(p + 1, p + 1)   :
+                                                  filebasename(s, p + 1)       ;
         }
 
 static constexpr const char *filebasename(const char *s)
@@ -541,8 +541,7 @@ void fillBuffer(TxBuffer_t &b)
                                 );
                         b.putT(m.Temperature);
                         b.putP(m.Pressure);
-                        // no method for 2-byte RH, directly encode it.
-                        b.put2uf((m.Humidity / 100.0f) * 65535.0f);
+                        b.putRH(m.Humidity);
 
                         flag |= FlagsSensor2::FlagTPH;
                         }
