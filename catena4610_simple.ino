@@ -365,7 +365,8 @@ void setup_rev()
                         );
                 boardRev = 2;
                 }
-        else {
+        else
+                {
                 printBoardInfo();
                 }
         }
