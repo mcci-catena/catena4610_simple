@@ -51,6 +51,29 @@ using namespace Mcci_Ltr_329als;
 |
 \****************************************************************************/
 
+
+static constexpr uint8_t kMessageFormatV2 = 0x1A;
+
+enum class Flags : uint8_t
+        {
+        Vbat = 1 << 0,      // Battery voltage
+        Vcc = 1 << 1,       // system voltage
+        Boot = 1 << 2,      // boot count
+        Env = 1 << 3,       // temperature, humidity
+        Light = 1 << 4,     // light (lux))
+        };
+
+constexpr Flags operator| (const Flags lhs, const Flags rhs)
+        {
+        return Flags(uint8_t(lhs) | uint8_t(rhs));
+        };
+
+inline Flags operator|= (Flags &lhs, const Flags &rhs)
+        {
+        lhs = lhs | rhs;
+        return lhs;
+        };
+
 /* adjustable timing parameters */
 enum    {
         // set this to interval between transmissions, in seconds
@@ -494,17 +517,31 @@ void loop()
 
 void fillBuffer(TxBuffer_t &b)
         {
-        if (fLight && !isVersion2())
+        bool fVersion2 = false;
+
+        if (!isVersion2())
+                fVersion2 = false;
+        else
+                fVersion2 = true;
+
+        if (fLight && !fVersion2)
                 {
                 gSi1133.start(true);
                 }
 
         b.begin();
-        FlagsSensor2 flag;
+        Flags flag;
+        flag = Flags(0);
 
-        flag = FlagsSensor2(0);
+        if (!fVersion2)
+                {
+                b.put(FormatSensor2); /* the flag for this record format */
+                }
+        else
+                {
+                b.put(kMessageFormatV2); /* the flag for this record format */
+                }
 
-        b.put(FormatSensor2); /* the flag for this record format */
         uint8_t * const pFlag = b.getp();
         b.put(0x00); /* will be set to the flags */
 
@@ -512,7 +549,7 @@ void fillBuffer(TxBuffer_t &b)
         float vBat = gCatena.ReadVbat();
         gCatena.SafePrintf("vBat:    %d mV\n", (int) (vBat * 1000.0f));
         b.putV(vBat);
-        flag |= FlagsSensor2::FlagVbat;
+        flag |= Flags::Vbat;
 
         // vBus is sent as 5000 * v
         float vBus = gCatena.ReadVbus();
@@ -523,10 +560,10 @@ void fillBuffer(TxBuffer_t &b)
         if (gCatena.getBootCount(bootCount))
                 {
                 b.putBootCountLsb(bootCount);
-                flag |= FlagsSensor2::FlagBoot;
+                flag |= Flags::Boot;
                 }
 
-        if (!isVersion2())
+        if (!fVersion2)
                 {
                 if (fTemperature)
                         {
@@ -544,7 +581,7 @@ void fillBuffer(TxBuffer_t &b)
                         b.putP(m.Pressure);
                         b.putRH(m.Humidity);
 
-                        flag |= FlagsSensor2::FlagTPH;
+                        flag |= Flags::Env;
                         }
 
                 if (fLight)
@@ -567,7 +604,7 @@ void fillBuffer(TxBuffer_t &b)
                                 );
                         b.putLux(LMIC_f2uflt16(data[1] / pow(2.0, 24)));
 
-                        flag |= FlagsSensor2::FlagLux;
+                        flag |= Flags::Light;
                         }
                 }
         else
@@ -590,7 +627,7 @@ void fillBuffer(TxBuffer_t &b)
                                 // no method for 2-byte RH, directly encode it.
                                 b.put2uf((m.Humidity / 100.0f) * 65535.0f);
 
-                                flag |= FlagsSensor2::FlagTPH;
+                                flag |= Flags::Env;
                                 }
                         }
                 else
@@ -647,7 +684,7 @@ void fillBuffer(TxBuffer_t &b)
                                 else
                                         gAlsCtrl.setGain(1);
 
-                                flag |= FlagsSensor2::FlagLux;
+                                flag |= Flags::Light;
                                 }
                         }
                 }
