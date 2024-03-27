@@ -173,15 +173,6 @@ using ParamBoard_t = Flash_t::ParamBoard_t;
 using PageEndSignature1_t = Flash_t::PageEndSignature1_t;
 using ParamDescId = Flash_t::ParamDescId;
 
-// flag to disable LED
-bool fDisableLED;
-
-// set flag if Network time set to RTC
-bool fNwTimeSet;
-
-// set start time when network time is being set
-std::uint32_t startTime;
-
 // get Rev number
 std::uint8_t boardRev;
 
