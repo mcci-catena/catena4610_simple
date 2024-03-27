@@ -6,7 +6,7 @@ Function:
         Sensor program for Catena 4610.
 
 Copyright notice:
-        This file copyright (C) 2019 by
+        This file copyright (C) 2019 - 2023 by
 
                 MCCI Corporation
                 3520 Krums Corners Road
@@ -30,20 +30,49 @@ Author:
 #include <Adafruit_BME280.h>
 #include <Arduino_LoRaWAN.h>
 #include <Catena_Si1133.h>
+#include <Catena-SHT3x.h>
+#include <mcci_ltr_329als.h>
+
 #include <lmic.h>
 #include <hal/hal.h>
 #include <mcciadk_baselib.h>
+#include <Catena_FlashParam.h>
+#include <Catena_Log.h>
 
 #include <cmath>
 #include <type_traits>
 
 using namespace McciCatena;
+using namespace Mcci_Ltr_329als;
 
 /****************************************************************************\
 |
 |	Manifest Constants & Typedefs
 |
 \****************************************************************************/
+
+
+static constexpr uint8_t kMessageFormatV2 = 0x1A;
+
+enum class Flags : uint8_t
+        {
+        Vbat = 1 << 0,      // Battery voltage
+        Vcc = 1 << 1,       // system voltage
+        Boot = 1 << 2,      // boot count
+        Env = 1 << 3,       // temperature, humidity
+        Light = 1 << 4,     // light (lux))
+        };
+
+constexpr Flags operator| (const Flags lhs, const Flags rhs)
+        {
+        return Flags(uint8_t(lhs) | uint8_t(rhs));
+        };
+
+inline Flags operator|= (Flags &lhs, const Flags &rhs)
+        {
+        lhs = lhs | rhs;
+        return lhs;
+        };
 
 /* adjustable timing parameters */
 enum    {
@@ -97,16 +126,16 @@ static Arduino_LoRaWAN::ReceivePortBufferCbFn receiveMessage;
 // two-argument version: first arg is what to return if we don't find
 // a directory separator in the second part.
 static constexpr const char *filebasename(const char *s, const char *p)
-    {
-    return p[0] == '\0'                     ? s                            :
-           (p[0] == '/' || p[0] == '\\')    ? filebasename(p + 1, p + 1)   :
-                                              filebasename(s, p + 1)       ;
-    }
+        {
+        return p[0] == '\0'                     ? s                            :
+                (p[0] == '/' || p[0] == '\\')   ? filebasename(p + 1, p + 1)   :
+                                                  filebasename(s, p + 1)       ;
+        }
 
 static constexpr const char *filebasename(const char *s)
-    {
-    return filebasename(s, s);
-    }
+        {
+        return filebasename(s, s);
+        }
 
 
 /****************************************************************************\
@@ -115,7 +144,7 @@ static constexpr const char *filebasename(const char *s)
 |
 \****************************************************************************/
 
-static const char sVersion[] = "0.2.0";
+static const char sVersion[] = "0.3.0";
 
 /****************************************************************************\
 |
@@ -138,12 +167,40 @@ Catena::LoRaWAN gLoRaWAN;
 //
 StatusLed gLed (Catena::PIN_STATUS_LED);
 
+// concrete type for flash parameters
+using Flash_t = McciCatena::FlashParamsStm32L0_t;
+using ParamBoard_t = Flash_t::ParamBoard_t;
+using PageEndSignature1_t = Flash_t::PageEndSignature1_t;
+using ParamDescId = Flash_t::ParamDescId;
+
+// get Rev number
+std::uint8_t boardRev;
+
+// fetch the signature
+const PageEndSignature1_t * const pRomSig =
+        reinterpret_cast<const PageEndSignature1_t *>(Flash_t::kPageEndSignature1Address);
+
+// get pointer to memory block */
+uint32_t descAddr = pRomSig->getParamPointer();
+
+// find the serial number (must be first)
+const ParamBoard_t * const pBoard = reinterpret_cast<const ParamBoard_t *>(descAddr);
+
 //   The temperature/humidity sensor
 Adafruit_BME280 gBme; // The default initalizer creates an I2C connection
-bool fBme;
 
 //   The LUX sensor
 Catena_Si1133 gSi1133;
+
+//   SHT temperature sensor/humidity Sensor
+using cTemperatureSensor = McciCatenaSht3x::cSHT3x;
+cTemperatureSensor gTemperatureSensor {Wire};
+
+//   LTR329 LUX sensor
+Ltr_329als gLtr {Wire};
+Mcci_Ltr_329als_Regs::AlsContr_t gAlsCtrl;
+
+bool fTemperature;
 bool fLight;
 
 SPIClass gSPI2(
@@ -152,7 +209,7 @@ SPIClass gSPI2(
                 Catena::PIN_SPI2_SCK
                 );
 
-//   The flash
+//  The flash
 Catena_Mx25v8035f gFlash;
 bool fFlash;
 
@@ -170,8 +227,6 @@ void sensorJob_cb(osjob_t *pJob);
 unsigned gTxCycle;
 // remaining before we reset to default
 unsigned gTxCycleCount;
-
-
 
 /*
 
@@ -202,9 +257,20 @@ void setup(void)
         gCatena.begin();
 
         setup_platform();
-        setup_light();
-        setup_bme280();
         setup_flash();
+        setup_rev();
+
+        if (!isVersion2())
+                {
+                setup_bme280();
+                setup_light();
+                }
+        else
+                {
+                setup_ltr329();
+                setup_sht3x();
+                }
+
         setup_uplink();
         }
 
@@ -227,9 +293,9 @@ void setup_platform(void)
                 {
                 char sRegion[16];
                 gCatena.SafePrintf("Target network: %s / %s\n",
-                                gLoRaWAN.GetNetworkName(),
-                                gLoRaWAN.GetRegionString(sRegion, sizeof(sRegion))
-                                );
+                        gLoRaWAN.GetNetworkName(),
+                        gLoRaWAN.GetRegionString(sRegion, sizeof(sRegion))
+                        );
                 }
         gCatena.SafePrintf("Enter 'help' for a list of commands.\n");
         gCatena.SafePrintf("(remember to select 'Line Ending: Newline' at the bottom of the monitor window.)\n");
@@ -304,6 +370,21 @@ void setup_platform(void)
                 }
         }
 
+void setup_rev()
+        {
+        if (!flashParam())
+                {
+                gCatena.SafePrintf(
+                        "**Unable to fetch flash parameters, assuming 4610 version 1 (rev C or earlier)!\n"
+                        );
+                boardRev = 2;
+                }
+        else
+                {
+                printBoardInfo();
+                }
+        }
+
 void setup_light(void)
         {
         if (gSi1133.begin())
@@ -312,11 +393,12 @@ void setup_light(void)
                 gSi1133.configure(0, CATENA_SI1133_MODE_SmallIR);
                 gSi1133.configure(1, CATENA_SI1133_MODE_White);
                 gSi1133.configure(2, CATENA_SI1133_MODE_UV);
+                gCatena.SafePrintf("Light sensor found\n");
                 }
         else
                 {
                 fLight = false;
-                gCatena.SafePrintf("No Si1133 found: check hardware\n");
+                gCatena.SafePrintf("No Light sensor found: check hardware\n");
                 }
         }
 
@@ -324,12 +406,13 @@ void setup_bme280(void)
         {
         if (gBme.begin(BME280_ADDRESS, Adafruit_BME280::OPERATING_MODE::Sleep))
                 {
-                fBme = true;
+                fTemperature = true;
+                gCatena.SafePrintf("Temperature/Humidity sensor found\n");
                 }
         else
                 {
-                fBme = false;
-                gCatena.SafePrintf("No BME280 found: check hardware\n");
+                fTemperature = false;
+                gCatena.SafePrintf("No Temperature/Humidity sensor found: check hardware\n");
                 }
         }
 
@@ -347,6 +430,34 @@ void setup_flash(void)
                 gFlash.end();
                 gSPI2.end();
                 gCatena.SafePrintf("No FLASH found: check hardware\n");
+                }
+        }
+
+void setup_sht3x(void)
+        {
+        if (gTemperatureSensor.begin())
+                {
+                fTemperature = true;
+                gCatena.SafePrintf("Temperature/Humidity sensor found\n");
+                }
+        else
+                {
+                fTemperature = false;
+                gCatena.SafePrintf("No Temperature/Humidity sensor found: check hardware\n");
+                }
+        }
+
+void setup_ltr329(void)
+        {
+        if (! gLtr.begin())
+                {
+                gCatena.SafePrintf("No Light sensor found: check hardware\n");
+                fLight = false;
+                }
+        else
+                {
+                gCatena.SafePrintf("Light sensor found\n");
+                fLight = true;
                 }
         }
 
@@ -397,15 +508,31 @@ void loop()
 
 void fillBuffer(TxBuffer_t &b)
         {
-        if (fLight)
+        bool fVersion2 = false;
+
+        if (!isVersion2())
+                fVersion2 = false;
+        else
+                fVersion2 = true;
+
+        if (fLight && !fVersion2)
+                {
                 gSi1133.start(true);
+                }
 
         b.begin();
-        FlagsSensor2 flag;
+        Flags flag;
+        flag = Flags(0);
 
-        flag = FlagsSensor2(0);
+        if (!fVersion2)
+                {
+                b.put(FormatSensor2); /* the flag for this record format */
+                }
+        else
+                {
+                b.put(kMessageFormatV2); /* the flag for this record format */
+                }
 
-        b.put(FormatSensor2); /* the flag for this record format */
         uint8_t * const pFlag = b.getp();
         b.put(0x00); /* will be set to the flags */
 
@@ -413,7 +540,7 @@ void fillBuffer(TxBuffer_t &b)
         float vBat = gCatena.ReadVbat();
         gCatena.SafePrintf("vBat:    %d mV\n", (int) (vBat * 1000.0f));
         b.putV(vBat);
-        flag |= FlagsSensor2::FlagVbat;
+        flag |= Flags::Vbat;
 
         // vBus is sent as 5000 * v
         float vBus = gCatena.ReadVbus();
@@ -424,50 +551,134 @@ void fillBuffer(TxBuffer_t &b)
         if (gCatena.getBootCount(bootCount))
                 {
                 b.putBootCountLsb(bootCount);
-                flag |= FlagsSensor2::FlagBoot;
+                flag |= Flags::Boot;
                 }
 
-        if (fBme)
+        if (!fVersion2)
                 {
-                Adafruit_BME280::Measurements m = gBme.readTemperaturePressureHumidity();
+                if (fTemperature)
+                        {
+                        Adafruit_BME280::Measurements m = gBme.readTemperaturePressureHumidity();
                         // temperature is 2 bytes from -0x80.00 to +0x7F.FF degrees C
-                // pressure is 2 bytes, hPa * 10.
-                // humidity is one byte, where 0 == 0/256 and 0xFF == 255/256.
+                        // pressure is 2 bytes, hPa * 10.
+                        // humidity is one byte, where 0 == 0/256 and 0xFF == 255/256.
                         gCatena.SafePrintf(
                         "BME280:  T: %d P: %d RH: %d\n",
-                        (int) m.Temperature,
-                        (int) m.Pressure,
+                                (int) m.Temperature,
+                                (int) m.Pressure,
                                 (int) m.Humidity
                                 );
                         b.putT(m.Temperature);
-                b.putP(m.Pressure);
-                b.putRH(m.Humidity);
+                        b.putP(m.Pressure);
+                        b.putRH(m.Humidity);
 
-                flag |= FlagsSensor2::FlagTPH;
-                }
-
-        if (fLight)
-                {
-                /* Get a new sensor event */
-                uint16_t data[3];
-
-                while (! gSi1133.isOneTimeReady())
-                        {
-                        yield();
+                        flag |= Flags::Env;
                         }
 
-                gSi1133.readMultiChannelData(data, 3);
-                gSi1133.stop();
-                gCatena.SafePrintf(
-                        "Si1133:  %u IR, %u White, %u UV\n",
-                        data[0],
-                        data[1],
-                        data[2]
-                        );
-                b.putLux(data[1]);
-                flag |= FlagsSensor2::FlagLux;
-                }
+                if (fLight)
+                        {
+                        /* Get a new sensor event */
+                        uint16_t data[3];
 
+                        while (! gSi1133.isOneTimeReady())
+                                {
+                                yield();
+                                }
+
+                        gSi1133.readMultiChannelData(data, 3);
+                        gSi1133.stop();
+                        gCatena.SafePrintf(
+                                "Si1133:  %u IR, %u White, %u UV\n",
+                                data[0],
+                                data[1],
+                                data[2]
+                                );
+                        b.putLux(LMIC_f2uflt16(data[1] / pow(2.0, 24)));
+
+                        flag |= Flags::Light;
+                        }
+                }
+        else
+                {
+                if (fTemperature)
+                        {
+                        cTemperatureSensor::Measurements m;
+                        bool fResult = gTemperatureSensor.getTemperatureHumidity(m);
+
+                        if (fResult)
+                                {
+                                // temperature is 2 bytes from -0x80.00 to +0x7F.FF degrees C
+                                // humidity is 2 bytes, where 0 == 0/0xFFFF and 0xFFFFF == 1.
+                                gCatena.SafePrintf(
+                                        "Env:  T: %d RH: %d\n",
+                                        (int) (m.Temperature + 0.5f),
+                                        (int) m.Humidity
+                                        );
+                                b.putT(m.Temperature);
+                                // no method for 2-byte RH, directly encode it.
+                                b.put2uf((m.Humidity / 100.0f) * 65535.0f);
+
+                                flag |= Flags::Env;
+                                }
+                        }
+                else
+                        {
+                        gCatena.SafePrintf(
+                                "Env sensor not found\n"
+                                );
+                        }
+
+                if (fLight)
+                        {
+                        bool fError;
+                        static constexpr float kMax_Gain_96 = 640.0f;
+                        static constexpr float kMax_Gain_48 = 1280.0f;
+                        static constexpr float kMax_Gain_8 = 7936.0f;
+                        static constexpr float kMax_Gain_4 = 16128.0f;
+                        static constexpr float kMax_Gain_2 = 32512.0f;
+                        static constexpr float kMax_Gain_1 = 65535.0f;
+
+                        // start a measurement
+                        if (! gLtr.startSingleMeasurement())
+                                gCatena.SafePrintf("gLtr.startSingleMeasurement() failed\n");
+
+                        // wait for measurement to complete.
+                        while (! gLtr.queryReady(fError))
+                                {
+                                if (fError)
+                                        break;
+                                }
+
+                        if (fError)
+                                {
+                                gCatena.SafePrintf("queryReady() failed\n");
+                                }
+                        else
+                                {
+                                float currentLux = gLtr.getLux();
+                                gCatena.SafePrintf(
+                                        "LTR329: %d Lux\n",
+                                        (int)currentLux
+                                        );
+                                b.put3f(currentLux);
+
+                                if (currentLux <= kMax_Gain_96)
+                                        gAlsCtrl.setGain(96);
+                                else if (currentLux <= kMax_Gain_48)
+                                        gAlsCtrl.setGain(48);
+                                else if (currentLux <= kMax_Gain_8)
+                                        gAlsCtrl.setGain(8);
+                                else if (currentLux <= kMax_Gain_4)
+                                        gAlsCtrl.setGain(4);
+                                else if (currentLux <= kMax_Gain_2)
+                                        gAlsCtrl.setGain(2);
+                                else
+                                        gAlsCtrl.setGain(1);
+
+                                flag |= Flags::Light;
+                                }
+                        }
+                }
 
         *pFlag = uint8_t(flag);
         }
@@ -805,4 +1016,78 @@ void setTxCycleTime(
 
         gTxCycle = txCycle;
         gTxCycleCount = txCount;
+        }
+
+bool flashParam()
+        {
+        const auto guid { Flash_t::kPageEndSignature1_Guid };
+
+        if (std::memcmp((const void *) &pRomSig->Guid, (const void *) &guid, sizeof(pRomSig->Guid)) != 0)
+                {
+                return false;
+                }
+
+        if (! pRomSig->isValidParamPointer(descAddr))
+                {
+                return false;
+                }
+
+        // check the ID and length
+        if (! (
+                pBoard->uLen == sizeof(*pBoard) &&
+                pBoard->uType == unsigned(ParamDescId::Board)
+                ))
+                {
+                return false;
+                }
+
+        boardRev = pBoard->getRev();
+        return true;
+        }
+
+void printBoardInfo()
+        {
+        // print the s/n, model, rev
+        gLog.printf(gLog.kInfo, "serial-number:");
+        uint8_t serial[pBoard->nSerial];
+        pBoard->getSerialNumber(serial);
+
+        for (unsigned i = 0; i < sizeof(serial); ++i)
+                gCatena.SafePrintf("%c%02x", i == 0 ? ' ' : '-', serial[i]);
+
+        gLog.printf(
+                gLog.kInfo,
+                "\nAssembly-number: %u\nModel: %u\n",
+                pBoard->getAssembly(),
+                pBoard->getModel()
+                );
+        delay(1);
+        gLog.printf(
+                gLog.kInfo,
+                "ModNumber: %u\n",
+                pBoard->getModNumber()
+                );
+        gLog.printf(
+                gLog.kInfo,
+                "RevNumber: %u\n",
+                boardRev
+                );
+        gLog.printf(
+                gLog.kInfo,
+                "Rev: %c\n",
+                pBoard->getRevChar()
+                );
+        gLog.printf(
+                gLog.kInfo,
+                "Dash: %u\n",
+                pBoard->getDash()
+                );
+        }
+
+bool isVersion2()
+        {
+        if (boardRev < 3)
+                return false;
+        else
+                return true;
         }
